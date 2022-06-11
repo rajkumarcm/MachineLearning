@@ -24,7 +24,7 @@ class MSE:
 
 class Dense: # For now let's implement just Dense
 
-    def __init__(self, input_units, units, Activation):
+    def __init__(self, input_units, units, Activation, reg='l1', alpha=0.5):
         """
         Feedforward layer
         :param input_units: input shape
@@ -37,6 +37,8 @@ class Dense: # For now let's implement just Dense
         self.output_units = units
         self.W = self.initialise_weights()
         self.activation = Activation()
+        self.reg = reg
+        self.alpha = alpha
 
     def initialise_weights(self):
         W = np.random.normal(loc=0, scale=1, size=[self.input_units, self.output_units])
@@ -58,6 +60,14 @@ class Dense: # For now let's implement just Dense
         # Use gradient descent for now
         tmp_grad = incoming_grad * self.activation.grad(H_curr)
         local_grad = Z_prev.T @ (tmp_grad)  # gradient for computing the weight-update
+        # Inject gradient of regularization to local_grad-------------
+        reg_grad = np.copy(self.W)
+        if self.reg == 'l1' or self.reg == 'lasso':
+            reg_grad[self.W >= 1] = self.alpha
+            reg_grad[self.W < 0] = -self.alpha
+            reg_grad[self.W == 0] = 0
+        local_grad += reg_grad
+        #--------------------------------------------------------------
         outbound_grad = tmp_grad @ self.W.T  # gradient for the next layer
         return local_grad, outbound_grad
 
@@ -99,8 +109,7 @@ class Model:
             y_hat[si:ei] = self.__forward(batch_X, training=False)
         return self.loss(y_hat, y)
 
-    def fit(self, X, y, X_val, y_val, epochs, batch_size):
-        lr = 1e-1
+    def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1):
         layer_refs = list(reversed(self.config))
         N = X.shape[0]
         steps = N//batch_size
@@ -113,8 +122,14 @@ class Model:
                 batch_X = X[si:ei]
                 batch_y = y[si:ei]
                 y_pred = self.__forward(batch_X)
-                tr_loss[epoch] += self.loss(y_pred, batch_y)
-                vl_loss[epoch] += self.validate(X_val, y_val, batch_size)
+                # Inject magnitude of weights here for l1 regularization
+                # loop over all layers and sum all the absolute weights
+                weight_mag = 0
+                alpha = 0.5 # for now
+                for layer in layer_refs:
+                    weight_mag += np.sum(np.abs(layer.W))
+                tr_loss[epoch] += self.loss(y_pred, batch_y) + alpha * weight_mag
+                vl_loss[epoch] += self.validate(X_val, y_val, batch_size) + alpha * weight_mag
                 incoming_grad = self.loss.grad(y_pred, batch_y)
                 for i, layer in zip(range(len(layer_refs)-1, -1, -1), layer_refs):
                     if i == 0:
@@ -129,6 +144,7 @@ class Model:
                   f'Validation Loss: {np.round(np.mean(vl_loss[epoch]), 4)}')
 
 if __name__ == '__main__':
+    # np.random.seed(1234)
     X = np.random.random([100, 5])
     y = X @ np.random.random([5, 1])
 
@@ -140,7 +156,7 @@ if __name__ == '__main__':
     config = [Dense(5, 10, LReLU),
               Dense(10, 1, LReLU)]
     model = Model(config, MSE)
-    model.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=10)
+    model.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=10, lr=1e-2)
 
 
 
