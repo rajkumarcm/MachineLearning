@@ -24,7 +24,7 @@ class MSE:
 
 class Dense: # For now let's implement just Dense
 
-    def __init__(self, input_units, units, Activation, reg='None', alpha=0.5):
+    def __init__(self, input_units, units, Activation, reg='None', alpha=0.5, beta=0.5):
         """
         Feedforward layer
         :param input_units: input shape
@@ -39,6 +39,7 @@ class Dense: # For now let's implement just Dense
         self.activation = Activation()
         self.reg = reg
         self.alpha = alpha
+        self.beta = beta
 
     def initialise_weights(self):
         W = np.random.normal(loc=0, scale=1, size=[self.input_units, self.output_units])
@@ -62,12 +63,20 @@ class Dense: # For now let's implement just Dense
         local_grad = Z_prev.T @ (tmp_grad)  # gradient for computing the weight-update
         # Inject gradient of regularization to local_grad-------------
         reg_grad = np.copy(self.W)
-        if self.reg == 'l1' or self.reg == 'lasso':
-            reg_grad[self.W >= 1] = self.alpha
-            reg_grad[self.W < 0] = -self.alpha
+        l1_coeff = self.alpha
+        l2_coeff = 2
+        if self.reg == 'elastic':
+            l1_coeff *= self.beta
+            l2_coeff = (self.alpha * (1 - self.beta))/2
+        if self.reg == 'l1' or self.reg == 'lasso' or self.reg == 'elastic':
+            reg_grad[self.W >= 1] = l1_coeff
+            reg_grad[self.W < 0] = -l1_coeff
             reg_grad[self.W == 0] = 0
-        if self.reg == 'l2' or self.reg == 'ridge':
-            reg_grad = 2 * reg_grad
+        if self.reg == 'l2' or self.reg == 'ridge' or self.reg == 'elastic':
+            if self.reg == 'elastic':
+                reg_grad += l2_coeff * self.W
+            else:
+                reg_grad = l2_coeff * self.W
         local_grad += reg_grad
         #--------------------------------------------------------------
         outbound_grad = tmp_grad @ self.W.T  # gradient for the next layer
@@ -111,7 +120,7 @@ class Model:
             y_hat[si:ei] = self.__forward(batch_X, training=False)
         return self.loss(y_hat, y)
 
-    def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1, reg='None', alpha=0.5, verbose=False):
+    def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1, reg='None', alpha=0.5, beta=0.5, verbose=False):
         layer_refs = list(reversed(self.config))
         N = X.shape[0]
         steps = N//batch_size
@@ -131,17 +140,23 @@ class Model:
                 # Inject magnitude of weights here for l1/l2 regularization
                 # loop over all layers and sum all the absolute weights
                 weight_mag = 0
-                if reg == 'l1' or reg == 'lasso':
+                if reg == 'elastic':
+                    beta = alpha * (1 - beta)
+                    alpha *= beta
+
+                if reg == 'l1' or reg == 'lasso' or reg == 'elastic':
                     for layer in layer_refs:
                         weight_mag += np.sum(np.abs(layer.W))
+                    weight_mag += alpha * weight_mag
 
-                if reg == 'l2' or reg == 'ridge':
+                if reg == 'l2' or reg == 'ridge' or reg == 'elastic':
                     for layer in layer_refs:
                         W = layer.W.ravel()
                         weight_mag += W.T @ W
+                    weight_mag += beta * weight_mag
 
-                tr_loss[epoch] += alpha * weight_mag
-                vl_loss[epoch] += alpha * weight_mag
+                tr_loss[epoch] += weight_mag
+                vl_loss[epoch] += weight_mag
 
                 incoming_grad = self.loss.grad(y_pred, batch_y)
                 for i, layer in zip(range(len(layer_refs)-1, -1, -1), layer_refs):
@@ -161,9 +176,10 @@ class Model:
 
 if __name__ == '__main__':
 
-    np.random.seed(633)
-    epochs = 50
-    l1_epochs = l2_epochs = 70
+    # np.random.seed(633)
+    epochs = 120
+    l1_epochs = l2_epochs = elastic_epochs = 120
+
     batch_size = 10
     lr = 1e-2
     X = np.random.random([100, 5])
@@ -189,10 +205,17 @@ if __name__ == '__main__':
     model_no_reg = Model(no_reg_config, MSE)
     no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr)
 
+    elastic_config = [Dense(5, 10, LReLU, reg='elastic'),
+                      Dense(10, 1, LReLU, reg='elastic')]
+    elastic_model = Model(elastic_config, MSE)
+    elastic_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=elastic_epochs, batch_size=batch_size,
+                                lr=lr, reg='elastic')
+
     fig, axes = plt.subplots(2, 2, figsize=(11, 7))
     axes[0, 0].plot(range(epochs), l1_hist['tr_loss'][:epochs], '-b', label='L1 reg tr loss')
     axes[0, 0].plot(range(epochs), l2_hist['tr_loss'][:epochs], '-r', label='L2 reg tr loss')
     axes[0, 0].plot(range(epochs), no_reg_hist['tr_loss'], '-g', label='No reg tr loss')
+    axes[0, 0].plot(range(epochs), elastic_hist['tr_loss'][:epochs], '-m', label='Elastic net reg tr loss')
     axes[0, 0].set_xlabel('Epochs')
     axes[0, 0].set_ylabel('MSE with regularization')
     axes[0, 0].set_title('Training loss with different reg schemes')
@@ -218,7 +241,15 @@ if __name__ == '__main__':
     axes[1, 1].set_ylabel('MSE')
     axes[1, 1].set_title('No regularization')
     axes[1, 1].legend()
+    plt.show()
 
+    plt.figure()
+    plt.plot(range(elastic_epochs), elastic_hist['tr_loss'], '-b', label='Elastic net reg tr loss')
+    plt.plot(range(elastic_epochs), elastic_hist['vl_loss'], '-r', label='Elastic net reg vl loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('MSE')
+    plt.title('Elastic net regularization')
+    plt.legend()
     plt.show()
 
 
