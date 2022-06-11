@@ -24,7 +24,7 @@ class MSE:
 
 class Dense: # For now let's implement just Dense
 
-    def __init__(self, input_units, units, Activation, reg='l1', alpha=0.5):
+    def __init__(self, input_units, units, Activation, reg='None', alpha=0.5):
         """
         Feedforward layer
         :param input_units: input shape
@@ -66,6 +66,8 @@ class Dense: # For now let's implement just Dense
             reg_grad[self.W >= 1] = self.alpha
             reg_grad[self.W < 0] = -self.alpha
             reg_grad[self.W == 0] = 0
+        if self.reg == 'l2' or self.reg == 'ridge':
+            reg_grad = 2 * reg_grad
         local_grad += reg_grad
         #--------------------------------------------------------------
         outbound_grad = tmp_grad @ self.W.T  # gradient for the next layer
@@ -109,7 +111,7 @@ class Model:
             y_hat[si:ei] = self.__forward(batch_X, training=False)
         return self.loss(y_hat, y)
 
-    def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1):
+    def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1, reg='None', alpha=0.5, verbose=False):
         layer_refs = list(reversed(self.config))
         N = X.shape[0]
         steps = N//batch_size
@@ -122,14 +124,25 @@ class Model:
                 batch_X = X[si:ei]
                 batch_y = y[si:ei]
                 y_pred = self.__forward(batch_X)
-                # Inject magnitude of weights here for l1 regularization
+
+                tr_loss[epoch] += self.loss(y_pred, batch_y)
+                vl_loss[epoch] += self.validate(X_val, y_val, batch_size)
+
+                # Inject magnitude of weights here for l1/l2 regularization
                 # loop over all layers and sum all the absolute weights
                 weight_mag = 0
-                alpha = 0.5 # for now
-                for layer in layer_refs:
-                    weight_mag += np.sum(np.abs(layer.W))
-                tr_loss[epoch] += self.loss(y_pred, batch_y) + alpha * weight_mag
-                vl_loss[epoch] += self.validate(X_val, y_val, batch_size) + alpha * weight_mag
+                if reg == 'l1' or reg == 'lasso':
+                    for layer in layer_refs:
+                        weight_mag += np.sum(np.abs(layer.W))
+
+                if reg == 'l2' or reg == 'ridge':
+                    for layer in layer_refs:
+                        W = layer.W.ravel()
+                        weight_mag += W.T @ W
+
+                tr_loss[epoch] += alpha * weight_mag
+                vl_loss[epoch] += alpha * weight_mag
+
                 incoming_grad = self.loss.grad(y_pred, batch_y)
                 for i, layer in zip(range(len(layer_refs)-1, -1, -1), layer_refs):
                     if i == 0:
@@ -140,24 +153,72 @@ class Model:
                                                              Z_prev=self.outputs[i-1], lr=lr)
             tr_loss[epoch] /= epochs
             vl_loss[epoch] /= epochs
-            print(f'Epoch {epoch} Loss: {np.round(np.mean(tr_loss[epoch]), 4)}, '
-                  f'Validation Loss: {np.round(np.mean(vl_loss[epoch]), 4)}')
+            if verbose:
+                print(f'Epoch {epoch} Loss: {np.round(np.mean(tr_loss[epoch]), 4)}, '
+                      f'Validation Loss: {np.round(np.mean(vl_loss[epoch]), 4)}')
+        return {'tr_loss':tr_loss, 'vl_loss':vl_loss}
+
 
 if __name__ == '__main__':
-    # np.random.seed(1234)
+
+    np.random.seed(633)
+    epochs = 50
+    l1_epochs = l2_epochs = 70
+    batch_size = 10
+    lr = 1e-2
     X = np.random.random([100, 5])
     y = X @ np.random.random([5, 1])
 
     X_train = X[:50]
     y_train = y[:50]
-
     X_val = X[50:]
     y_val = y[50:]
-    config = [Dense(5, 10, LReLU),
-              Dense(10, 1, LReLU)]
-    model = Model(config, MSE)
-    model.fit(X_train, y_train, X_val, y_val, epochs=50, batch_size=10, lr=1e-2)
 
+    l1_config = [Dense(5, 10, LReLU, reg='l1'),
+                 Dense(10, 1, LReLU, reg='l1')]
+    l1_model = Model(l1_config, MSE)
+    l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1')
 
+    l2_config = [Dense(5, 10, LReLU, reg='l2'),
+                 Dense(10, 1, LReLU, reg='l2')]
+    l2_model = Model(l2_config, MSE)
+    l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2')
+
+    no_reg_config = [Dense(5, 10, LReLU),
+                     Dense(10, 1, LReLU)]
+    model_no_reg = Model(no_reg_config, MSE)
+    no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr)
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    axes[0, 0].plot(range(epochs), l1_hist['tr_loss'][:epochs], '-b', label='L1 reg tr loss')
+    axes[0, 0].plot(range(epochs), l2_hist['tr_loss'][:epochs], '-r', label='L2 reg tr loss')
+    axes[0, 0].plot(range(epochs), no_reg_hist['tr_loss'], '-g', label='No reg tr loss')
+    axes[0, 0].set_xlabel('Epochs')
+    axes[0, 0].set_ylabel('MSE with regularization')
+    axes[0, 0].set_title('Training loss with different reg schemes')
+    axes[0, 0].legend()
+
+    axes[0, 1].plot(range(l1_epochs), l1_hist['tr_loss'], '-b', label='L1 reg tr loss')
+    axes[0, 1].plot(range(l1_epochs), l1_hist['vl_loss'], '-r', label='L1 reg vl loss')
+    axes[0, 1].set_xlabel('Epochs')
+    axes[0, 1].set_ylabel('MSE')
+    axes[0, 1].set_title('L1 regularization')
+    axes[0, 1].legend()
+
+    axes[1, 0].plot(range(l2_epochs), l2_hist['tr_loss'], '-b', label='L2 reg tr loss')
+    axes[1, 0].plot(range(l2_epochs), l2_hist['vl_loss'], '-r', label='L2 reg vl loss')
+    axes[1, 0].set_xlabel('Epochs')
+    axes[1, 0].set_ylabel('MSE')
+    axes[1, 0].set_title('L2 regularization')
+    axes[1, 0].legend()
+
+    axes[1, 1].plot(range(epochs), no_reg_hist['tr_loss'], '-b', label='No reg tr loss')
+    axes[1, 1].plot(range(epochs), no_reg_hist['vl_loss'], '-r', label='No reg vl loss')
+    axes[1, 1].set_xlabel('Epochs')
+    axes[1, 1].set_ylabel('MSE')
+    axes[1, 1].set_title('No regularization')
+    axes[1, 1].legend()
+
+    plt.show()
 
 
