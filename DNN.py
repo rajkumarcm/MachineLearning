@@ -17,7 +17,7 @@ class LReLU:
 class MSE:
     def __call__(self, y_pred, y):
         diff = y_pred - y
-        return 1/len(y_pred) * diff.T @ diff
+        return np.ravel(1/len(y_pred) * diff.T @ diff)[0]
 
     def grad(self, y_pred, y):
         return (2/len(y_pred)) * (y_pred - y)
@@ -53,7 +53,10 @@ class Dense: # For now let's implement just Dense
         return W
 
     def __call__(self, X):
-        H = X @ self.W
+        try:
+            H = X @ self.W
+        except Exception:
+            print('debug')
         return H, self.activation(H)
 
     # Just imagine we are working with caching enabled all the time.
@@ -116,8 +119,13 @@ class Model:
         for step in range(steps):
             si = step * batch_size
             ei = si + batch_size
+            if step ==  steps-1:
+                remaining_size = X.shape[0] - si
+                ei = si + remaining_size
+
             batch_X = X[si:ei]
-            y_hat[si:ei] = self.__forward(batch_X, training=False)
+            tmp_yhat = self.__forward(batch_X, training=False)
+            y_hat[si:ei] = tmp_yhat
         return self.loss(y_hat, y)
 
     def fit(self, X, y, X_val, y_val, epochs, batch_size, lr=1e-1, reg='None', alpha=0.5, beta=0.5, verbose=False):
@@ -164,7 +172,7 @@ class Model:
                         incoming_grad = layer.update_weights(incoming_grad=incoming_grad, H_curr=self.outputs[i],
                                          Z_prev=batch_X, lr=lr)
                     else:
-                        incoming_grad = layer.update_weights(incoming_grad=incoming_grad, H_curr=self.outputs[-i],
+                        incoming_grad = layer.update_weights(incoming_grad=incoming_grad, H_curr=self.outputs[i],
                                                              Z_prev=self.outputs[i-1], lr=lr)
             tr_loss[epoch] /= epochs
             vl_loss[epoch] /= epochs
@@ -181,32 +189,51 @@ if __name__ == '__main__':
     l1_epochs = l2_epochs = elastic_epochs = 120
 
     batch_size = 10
-    lr = 1e-2
-    X = np.random.random([100, 5])
-    y = X @ np.random.random([5, 1])
+    lr = 1e-3
+    # X = np.random.random([100, 5])
+    # y = X @ np.random.random([5, 1])
+    #
+    # X_train = X[:50]
+    # y_train = y[:50]
+    #
+    # X_val = X[50:]
+    # y_val = y[50:]
 
-    X_train = X[:50]
-    y_train = y[:50]
-    X_val = X[50:]
-    y_val = y[50:]
+    import pandas as pd
+    df = pd.read_csv('data/insurance.csv')
+    df.drop('region', 'columns', inplace=True)
+    df.sex.replace({'female':1, 'male':0}, inplace=True)
+    df.smoker.replace({'yes':0, 'no':1}, inplace=True)
 
-    l1_config = [Dense(5, 10, LReLU, reg='l1'),
-                 Dense(10, 1, LReLU, reg='l1')]
+    df -= df.mean(axis=0)
+    df /= df.std(axis=0)
+
+    X_train = df.iloc[:-100, :-1].to_numpy()
+    y_train = df.iloc[:-100, -1].to_numpy()
+    y_train = np.reshape(y_train, [-1, 1])
+
+    X_val = df.iloc[-100:, :-1].to_numpy()
+    y_val = df.iloc[-100:, -1].to_numpy()
+    y_val = np.reshape(y_val, [-1, 1])
+
+    l1_config = [Dense(X_train.shape[1], 5, LReLU, reg='l1'),
+                 Dense(5, 1, LReLU, reg='l1')]
     l1_model = Model(l1_config, MSE)
-    l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1')
+    l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1',
+                           verbose=True)
 
-    l2_config = [Dense(5, 10, LReLU, reg='l2'),
-                 Dense(10, 1, LReLU, reg='l2')]
+    l2_config = [Dense(X_train.shape[1], 5, LReLU, reg='l2'),
+                 Dense(5, 1, LReLU, reg='l2')]
     l2_model = Model(l2_config, MSE)
     l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2')
 
-    no_reg_config = [Dense(5, 10, LReLU),
-                     Dense(10, 1, LReLU)]
+    no_reg_config = [Dense(X_train.shape[1], 5, LReLU),
+                     Dense(5, 1, LReLU)]
     model_no_reg = Model(no_reg_config, MSE)
     no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr)
 
-    elastic_config = [Dense(5, 10, LReLU, reg='elastic'),
-                      Dense(10, 1, LReLU, reg='elastic')]
+    elastic_config = [Dense(X_train.shape[1], 5, LReLU, reg='elastic'),
+                      Dense(5, 1, LReLU, reg='elastic')]
     elastic_model = Model(elastic_config, MSE)
     elastic_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=elastic_epochs, batch_size=batch_size,
                                 lr=lr, reg='elastic')
