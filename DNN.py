@@ -36,6 +36,7 @@ class Dense: # For now let's implement just Dense
         self.input_units = input_units
         self.output_units = units
         self.W = self.initialise_weights()
+        self.b = np.random.random([1, units])
         self.activation = Activation()
         self.reg = reg
         self.alpha = alpha
@@ -54,7 +55,7 @@ class Dense: # For now let's implement just Dense
 
     def __call__(self, X):
         try:
-            H = X @ self.W
+            H = X @ self.W + self.b
         except Exception:
             print('debug')
         return H, self.activation(H)
@@ -64,6 +65,7 @@ class Dense: # For now let's implement just Dense
         # Use gradient descent for now
         tmp_grad = incoming_grad * self.activation.grad(H_curr)
         local_grad = Z_prev.T @ (tmp_grad)  # gradient for computing the weight-update
+        local_grad_b = np.mean(tmp_grad, axis=0)
         # Inject gradient of regularization to local_grad-------------
         reg_grad = np.copy(self.W)
         l1_coeff = self.alpha
@@ -80,14 +82,16 @@ class Dense: # For now let's implement just Dense
                 reg_grad += l2_coeff * self.W
             else:
                 reg_grad = l2_coeff * self.W
-        local_grad += reg_grad
+        if self.reg != 'None':
+            local_grad += reg_grad
         #--------------------------------------------------------------
         outbound_grad = tmp_grad @ self.W.T  # gradient for the next layer
-        return local_grad, outbound_grad
+        return local_grad, local_grad_b, outbound_grad
 
     def update_weights(self, incoming_grad, H_curr, Z_prev, lr):
-        local_grad, outbound_grad = self.__backward(incoming_grad, H_curr, Z_prev)
+        local_grad, local_grad_b, outbound_grad = self.__backward(incoming_grad, H_curr, Z_prev)
         self.W -= lr * local_grad
+        self.b -= lr * local_grad_b
         return outbound_grad
 
 class Model:
@@ -138,6 +142,9 @@ class Model:
             for step in range(steps):
                 si = step*batch_size
                 ei = si + batch_size
+                if step == steps - 1:
+                    remaining_size = X.shape[0] - si
+                    ei = si + remaining_size
                 batch_X = X[si:ei]
                 batch_y = y[si:ei]
                 y_pred = self.__forward(batch_X)
