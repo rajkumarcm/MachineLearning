@@ -170,8 +170,8 @@ class Model:
                         weight_mag += W.T @ W
                     weight_mag += beta * weight_mag
 
-                tr_loss[epoch] += weight_mag
-                vl_loss[epoch] += weight_mag
+                # tr_loss[epoch] += weight_mag
+                # vl_loss[epoch] += weight_mag
 
                 incoming_grad = self.loss.grad(y_pred, batch_y)
                 for i, layer in zip(range(len(layer_refs)-1, -1, -1), layer_refs):
@@ -181,8 +181,8 @@ class Model:
                     else:
                         incoming_grad = layer.update_weights(incoming_grad=incoming_grad, H_curr=self.outputs[i],
                                                              Z_prev=self.outputs[i-1], lr=lr)
-            tr_loss[epoch] /= epochs
-            vl_loss[epoch] /= epochs
+            tr_loss[epoch] /= steps
+            vl_loss[epoch] /= steps
             if verbose:
                 print(f'Epoch {epoch} Loss: {np.round(np.mean(tr_loss[epoch]), 4)}, '
                       f'Validation Loss: {np.round(np.mean(vl_loss[epoch]), 4)}')
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     l1_epochs = l2_epochs = elastic_epochs = 120
 
     batch_size = 10
-    lr = 1e-3
+    lr = 1e-2
     # X = np.random.random([100, 5])
     # y = X @ np.random.random([5, 1])
     #
@@ -223,27 +223,33 @@ if __name__ == '__main__':
     y_val = df.iloc[-100:, -1].to_numpy()
     y_val = np.reshape(y_val, [-1, 1])
 
+    print('Fitting model with L1 regularization')
     l1_config = [Dense(X_train.shape[1], 5, LReLU, reg='l1'),
                  Dense(5, 1, LReLU, reg='l1')]
     l1_model = Model(l1_config, MSE)
     l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1',
-                           verbose=True)
+                           verbose=False)
 
+    print('Fitting model with L2 regularization')
     l2_config = [Dense(X_train.shape[1], 5, LReLU, reg='l2'),
                  Dense(5, 1, LReLU, reg='l2')]
     l2_model = Model(l2_config, MSE)
-    l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2')
+    l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2',
+                           verbose=False)
 
+    print('Fitting model without regularization')
     no_reg_config = [Dense(X_train.shape[1], 5, LReLU),
                      Dense(5, 1, LReLU)]
     model_no_reg = Model(no_reg_config, MSE)
-    no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr)
+    no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr,
+                                   verbose=True)
 
+    print('Fitting elastic model')
     elastic_config = [Dense(X_train.shape[1], 5, LReLU, reg='elastic'),
                       Dense(5, 1, LReLU, reg='elastic')]
     elastic_model = Model(elastic_config, MSE)
     elastic_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=elastic_epochs, batch_size=batch_size,
-                                lr=lr, reg='elastic')
+                                lr=lr, reg='elastic', verbose=True)
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 7))
     axes[0, 0].plot(range(epochs), l1_hist['tr_loss'][:epochs], '-b', label='L1 reg tr loss')
@@ -285,5 +291,4 @@ if __name__ == '__main__':
     plt.title('Elastic net regularization')
     plt.legend()
     plt.show()
-
 
