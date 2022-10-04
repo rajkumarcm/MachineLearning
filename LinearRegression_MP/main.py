@@ -101,8 +101,10 @@ if __name__ == '__main__':
     tr_losses = np.zeros([epochs])
     vl_losses = np.zeros([epochs])
     for epoch in range(epochs):
-        n_processes = 1
+        n_processes = 4
         process_size = X_train.shape[0]//n_processes
+
+        vl_process_size = X_val.shape[0]//n_processes
         processes = []
         w_gradient = None
         b_gradient = None
@@ -135,6 +137,33 @@ if __name__ == '__main__':
                         pred.extend(result[-remaining_size:, 0])
                         pred = np.array(pred).reshape([-1, 1])
 
+            # Val val_prediction------------------------------------------------------------------------------------------------
+            val_pred = np.zeros([n_processes, vl_process_size])
+            processes = []
+            for p_idx in range(n_processes):
+                start_idx = p_idx * vl_process_size
+                _length = start_idx + vl_process_size
+                if p_idx == n_processes - 1:
+                    _length = X_val.shape[0]
+                x_subset = X_val.iloc[start_idx:_length]
+                p = executor.submit(predict, X=x_subset, W=W, b=b, p_idx=p_idx)
+                processes.append(p)
+
+            for process in concurrent.futures.as_completed(processes):
+                result = process.result()
+                p_idx = list(result.keys())[0]
+                result = pd.Series(result.values()).iloc[0].values
+                val_pred[p_idx, :_length] = result[:vl_process_size, 0]
+
+                remaining = None
+                if p_idx == n_processes - 1:
+                    val_pred = np.reshape(val_pred, [-1, 1])
+                    remaining_size = X_val.shape[0] - int(vl_process_size * n_processes)
+                    if remaining_size > 0:
+                        val_pred = list(val_pred.reshape([-1]))
+                        val_pred.extend(result[-remaining_size:, 0])
+                        val_pred = np.array(val_pred).reshape([-1, 1])
+
             # Compute gradient------------------------------------------------------------------------------------------
             processes = []
             for p_idx in range(n_processes):
@@ -165,8 +194,10 @@ if __name__ == '__main__':
 
             # Loss------------------------------------------------------------------------------------------------------
             tr_loss = mse(y_train, pred, W)
+            vl_loss = mse(y_val, val_pred, W)
             tr_losses[epoch] = tr_loss
-            print(f'Epoch: {epoch} Loss: {tr_loss}')
+            vl_losses[epoch] = vl_loss
+            print(f'Epoch: {epoch} Loss: {tr_loss} Val_Loss: {vl_loss}')
 
     plt.figure()
     sns.lineplot(list(range(51)), tr_loss, markers=True)
