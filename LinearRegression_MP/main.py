@@ -20,9 +20,11 @@ def get_valid_rows(series):
 # 5. Loss function
 def mse(y, pred, W, gamma=0, alpha=1):
     diff = y - pred
-    return float(1/y.shape[0] * (diff.T @ diff)[0][0] + \
-           alpha * gamma * np.sum(np.abs(W)) + \
-           ((alpha * (1-gamma))/2) * np.sum(W**2))
+    return float(1/y.shape[0] * (diff.T @ diff)[0][0])
+    """+ \
+    alpha * gamma * np.sum(np.abs(W)) + \
+    ((alpha * (1-gamma))/2) * np.sum(W**2))
+    """
 
 # 6. Inferencing
 def predict(X, W, b, p_idx):
@@ -41,58 +43,68 @@ def get_gradient(X, y, pred, W, gamma=1, alpha=1):
 
 if __name__ == '__main__':
     # 1. Load the dataset
-    df = pd.read_csv('data/auto-mpg.data', header=None, sep='\s+',
-                     names=['mpg', 'cylinders', 'displacement', 'horsepower', 'weight', 'acceleration',
-                            'year', 'origin', 'name'],
-                     skip_blank_lines=True, on_bad_lines='warn')
+    # df = pd.read_csv('data/auto-mpg.data', header=None, sep='\s+',
+    #                  names=['mpg', 'cylinders', 'displacement', 'horsepower', 'weight', 'acceleration',
+    #                         'year', 'origin', 'name'],
+    #                  skip_blank_lines=True, on_bad_lines='warn')
 
     # 2. Clean the data
-    col_types = df.dtypes
-    cols_to_fix = []
-    for col in df.columns:
-        if not (np.array([col_types[col]]) == np.array([np.int32, np.int64, np.float32, np.float64])).any():
-            cols_to_fix.append(col)
+    # col_types = df.dtypes
+    # cols_to_fix = []
+    # for col in df.columns:
+    #     if not (np.array([col_types[col]]) == np.array([np.int32, np.int64, np.float32, np.float64])).any():
+    #         cols_to_fix.append(col)
+    #
+    # for col in cols_to_fix:
+    #     series = get_valid_rows(df.loc[:, col])
+    #     series = series.astype(np.float32)
+    #     series_mean = series.mean()
+    #     df.loc[:, col] = df.loc[:, col].apply(lambda x: replace_non_numeric(x, series_mean))
+    #     df.loc[:, col] = df.loc[:, col].astype(np.float32)
+    #
+    # # 3. Split the data
+    # n = df.shape[0]
+    # split_size = 2/3
+    # training_split = int(n * split_size)
+    # y = df.mpg
+    # df = df.drop(columns=['mpg', 'name'])
+    # X_train = df.iloc[:training_split]
+    # y_train = y.iloc[:training_split]
+    # X_val = df.iloc[training_split:]
+    # y_val = y.iloc[training_split:]
+    #
+    # # 3. Standardise data
+    # X_mean = X_train.mean(axis=0)
+    # X_sd = X_train.std(axis=0)
+    # y_mean = y.mean()
+    # y_sd = y.std()
+    #
+    # X_train = (X_train - X_mean)/X_sd
+    # X_val = (X_val - X_mean)/X_sd
+    # y_train = (y_train - y_mean)/y_sd
+    # y_val = (y_val - y_mean)/y_sd
+    #
+    # # 4. Correlation plot to avoid multicollinearity
+    # plt.figure(figsize=(9, 6))
+    # sns.heatmap(df.corr(method='pearson'), linewidth=0.5)
+    # plt.show()
 
-    for col in cols_to_fix:
-        series = get_valid_rows(df.loc[:, col])
-        series = series.astype(np.float32)
-        series_mean = series.mean()
-        df.loc[:, col] = df.loc[:, col].apply(lambda x: replace_non_numeric(x, series_mean))
-        df.loc[:, col] = df.loc[:, col].astype(np.float32)
+    X_train = np.load('data/X_train.npy')
+    X_val = np.load('data/X_val.npy')
+    y_train = np.load('data/y_train.npy')
+    y_val = np.load('data/y_val.npy')
 
-    # 3. Split the data
-    n = df.shape[0]
-    split_size = 2/3
-    training_split = int(n * split_size)
-    y = df.mpg
-    df = df.drop(columns=['mpg', 'name'])
-    X_train = df.iloc[:training_split]
-    y_train = y.iloc[:training_split]
-    X_val = df.iloc[training_split:]
-    y_val = y.iloc[training_split:]
-
-    # 3. Standardise data
-    X_mean = X_train.mean(axis=0)
-    X_sd = X_train.std(axis=0)
-    y_mean = y.mean()
-    y_sd = y.std()
-
-    X_train = (X_train - X_mean)/X_sd
-    X_val = (X_val - X_mean)/X_sd
-    y_train = (y_train - y_mean)/y_sd
-    y_val = (y_val - y_mean)/y_sd
-
-    # 4. Correlation plot to avoid multicollinearity
-    plt.figure(figsize=(9, 6))
-    sns.heatmap(df.corr(method='pearson'), linewidth=0.5)
-    plt.show()
+    X_train = pd.DataFrame(X_train)
+    X_val = pd.DataFrame(X_val)
+    y_train = pd.DataFrame(y_train)
+    y_val = pd.DataFrame(y_val)
 
     # 7. Define model
     np.random.seed(1234)
-    W = np.random.random([df.shape[1], 1])
+    W = np.random.random([X_train.shape[1], 1])
     b = np.random.random([1, 1])
     lr = 1e-1
-    epochs = 51
+    epochs = 15
     y_train = np.reshape(y_train.values, [-1, 1])
     y_val = np.reshape(y_val.values, [-1, 1])
 
@@ -101,7 +113,7 @@ if __name__ == '__main__':
     tr_losses = np.zeros([epochs])
     vl_losses = np.zeros([epochs])
     for epoch in range(epochs):
-        n_processes = 4
+        n_processes = 10
         process_size = X_train.shape[0]//n_processes
 
         vl_process_size = X_val.shape[0]//n_processes
