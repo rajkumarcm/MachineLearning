@@ -1,3 +1,9 @@
+"""
+Author: Rajkumar Conjeevaram Mohan
+Email: rajkumarcm@yahoo.com
+Linear Regression Distributed Training
+"""
+
 import numpy as np
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
@@ -6,89 +12,167 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 import re
 
-# 3. Naturally convert them to float treating float as native dtype
-def replace_non_numeric(x, mean):
-    if not re.fullmatch('\d+\.*\d*', x):
-        return mean
-    else:
-        return x
+class LinearRegression_MP:
 
-def get_valid_rows(series):
-    b_mask = series.apply(lambda x: True if re.fullmatch('\d+\.*\d*', x) else False)
-    return series[b_mask]
+    def __init__(self, alpha=1, gamma=1, lr=1e-1):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.lr0 = lr
+        np.random.seed(1234)
 
-# 5. Loss function
-def mse(y, pred, W, gamma=0, alpha=1):
-    diff = y - pred
-    return float(1/y.shape[0] * (diff.T @ diff)[0][0])
-    """+ \
-    alpha * gamma * np.sum(np.abs(W)) + \
-    ((alpha * (1-gamma))/2) * np.sum(W**2))
-    """
+    # 3. Naturally convert them to float treating float as native dtype
+    def replace_non_numeric(self, x, mean):
+        if not re.fullmatch('\d+\.*\d*', x):
+            return mean
+        else:
+            return x
 
-# 6. Inferencing
-def predict(X, W, b, p_idx):
-    result = {}
-    result[p_idx] = X @ W + b
-    return result
+    def get_valid_rows(self, series):
+        b_mask = series.apply(lambda x: True if re.fullmatch('\d+\.*\d*', x) else False)
+        return series[b_mask]
 
-def get_gradient(X, y, pred, W, gamma=1, alpha=1):
-    y = np.reshape(y, [-1, 1])
-    pred = np.reshape(pred, [-1, 1])
-    w_grad = X.T @ (y - pred) - \
-             (alpha * gamma * np.sign(W)) - \
-             (alpha * (1 - gamma)) * W
-    return w_grad, (y - pred) # for weights, and bias
+    # 5. Loss function
+    def mse(self, y, pred):
+        diff = y - pred
+        return float(1/y.shape[0] * (diff.T @ diff)[0][0])
 
+    # 6. Inferencing
+    def predict(self, X, p_idx):
+        result = {}
+        result[p_idx] = X @ self.W + self.b
+        return result
+
+    def get_gradient(self, X, y, pred):
+        y = np.reshape(y, [-1, 1])
+        pred = np.reshape(pred, [-1, 1])
+        w_grad = X.T @ (y - pred) - \
+                 (self.alpha * self.gamma * np.sign(self.W)) - \
+                 (self.alpha * (1 - self.gamma)) * self.W
+        return w_grad, (y - pred) # for weights, and bias
+
+
+    def fit(self, X_train, y_train, X_val, y_val, epochs=15):
+
+        # 7. Define model
+        self.W = np.random.random([X_train.shape[1], 1])
+        self.b = np.random.random([1, 1])
+
+        y_train = np.reshape(y_train.values, [-1, 1])
+        y_val = np.reshape(y_val.values, [-1, 1])
+
+        # Training---------------------------------------------------
+
+        # The following parameters for each model
+        tr_losses = np.zeros([epochs])
+        vl_losses = np.zeros([epochs])
+        for epoch in range(epochs):
+            n_processes = 16
+            process_size = X_train.shape[0]//n_processes
+
+            vl_process_size = X_val.shape[0]//n_processes
+            processes = []
+            w_gradient = None
+            b_gradient = None
+
+            s = 10
+            self.lr = self.lr0 / (1 + (epoch / n_processes))
+
+            # Inferencing
+            with concurrent.futures.ProcessPoolExecutor() as executor:
+
+                # Prediction------------------------------------------------------------------------------------------------
+                pred = np.zeros([n_processes, process_size])
+                for p_idx in range(n_processes):
+                    start_idx = p_idx * process_size
+                    _length = start_idx + process_size
+                    if p_idx == n_processes-1:
+                        _length = X_train.shape[0]
+                    x_subset = X_train.iloc[start_idx:_length]
+                    p = executor.submit(self.predict, X=x_subset,p_idx=p_idx)
+                    processes.append(p)
+
+                for process in concurrent.futures.as_completed(processes):
+                    result = process.result()
+                    p_idx = list(result.keys())[0]
+                    result = pd.Series(result.values()).iloc[0].values
+                    pred[p_idx, :_length] = result[:process_size, 0]
+
+                    remaining = None
+                    if p_idx == n_processes - 1:
+                        pred = np.reshape(pred, [-1, 1])
+                        remaining_size = X_train.shape[0] - int(process_size * n_processes)
+                        if remaining_size > 0:
+                            pred = list(pred.reshape([-1]))
+                            pred.extend(result[-remaining_size:, 0])
+                            pred = np.array(pred).reshape([-1, 1])
+
+                # Val val_prediction------------------------------------------------------------------------------------------------
+                val_pred = np.zeros([n_processes, vl_process_size])
+                processes = []
+                for p_idx in range(n_processes):
+                    start_idx = p_idx * vl_process_size
+                    _length = start_idx + vl_process_size
+                    if p_idx == n_processes - 1:
+                        _length = X_val.shape[0]
+                    x_subset = X_val.iloc[start_idx:_length]
+                    p = executor.submit(self.predict, X=x_subset, p_idx=p_idx)
+                    processes.append(p)
+
+                for process in concurrent.futures.as_completed(processes):
+                    result = process.result()
+                    p_idx = list(result.keys())[0]
+                    result = pd.Series(result.values()).iloc[0].values
+                    val_pred[p_idx, :_length] = result[:vl_process_size, 0]
+
+                    if p_idx == n_processes - 1:
+                        val_pred = np.reshape(val_pred, [-1, 1])
+                        remaining_size = X_val.shape[0] - int(vl_process_size * n_processes)
+                        if remaining_size > 0:
+                            val_pred = list(val_pred.reshape([-1]))
+                            val_pred.extend(result[-remaining_size:, 0])
+                            val_pred = np.array(val_pred).reshape([-1, 1])
+
+                # Compute gradient------------------------------------------------------------------------------------------
+                processes = []
+                for p_idx in range(n_processes):
+                    start_idx = p_idx * process_size
+                    _length = start_idx + process_size
+                    if p_idx == n_processes-1:
+                        _length = X_train.shape[0]
+                    x_subset = X_train.iloc[start_idx:_length]
+                    y_subset = y_train[start_idx:_length]
+                    pred_subset = pred[start_idx:_length]
+                    p = executor.submit(self.get_gradient, X=x_subset, y=y_subset, pred=pred_subset)
+                    processes.append(p)
+
+                for process in concurrent.futures.as_completed(processes):
+                    [w_grad, b_grad] = process.result()
+                    if w_gradient is None:
+                        w_gradient = w_grad
+                        b_gradient = np.sum(b_grad)[None, None]
+                    else:
+                        w_gradient += w_grad
+                        b_gradient += np.sum(b_grad)[None, None]
+                w_gradient = -2/X_train.shape[0] * w_gradient
+                b_gradient = -2/X_train.shape[0] * b_gradient
+
+                # Update weights--------------------------------------------------------------------------------------------
+                self.W -= self.lr * w_gradient
+                self.b -= self.lr * np.mean(b_gradient, axis=0)
+
+                # Loss------------------------------------------------------------------------------------------------------
+                tr_loss = self.mse(y_train, pred)
+                vl_loss = self.mse(y_val, val_pred)
+                tr_losses[epoch] = tr_loss
+                vl_losses[epoch] = vl_loss
+                print(f'Epoch: {epoch} Loss: {tr_loss} Val_Loss: {vl_loss}')
+        return {'tr':tr_losses, 'vl':vl_losses}, tr_loss, vl_loss
+
+# plt.figure()
+# sns.lineplot(list(range(51)), tr_loss, markers=True)
+# plt.show()
 
 if __name__ == '__main__':
-    # 1. Load the dataset
-    # df = pd.read_csv('data/auto-mpg.data', header=None, sep='\s+',
-    #                  names=['mpg', 'cylinders', 'displacement', 'horsepower', 'weight', 'acceleration',
-    #                         'year', 'origin', 'name'],
-    #                  skip_blank_lines=True, on_bad_lines='warn')
-
-    # 2. Clean the data
-    # col_types = df.dtypes
-    # cols_to_fix = []
-    # for col in df.columns:
-    #     if not (np.array([col_types[col]]) == np.array([np.int32, np.int64, np.float32, np.float64])).any():
-    #         cols_to_fix.append(col)
-    #
-    # for col in cols_to_fix:
-    #     series = get_valid_rows(df.loc[:, col])
-    #     series = series.astype(np.float32)
-    #     series_mean = series.mean()
-    #     df.loc[:, col] = df.loc[:, col].apply(lambda x: replace_non_numeric(x, series_mean))
-    #     df.loc[:, col] = df.loc[:, col].astype(np.float32)
-    #
-    # # 3. Split the data
-    # n = df.shape[0]
-    # split_size = 2/3
-    # training_split = int(n * split_size)
-    # y = df.mpg
-    # df = df.drop(columns=['mpg', 'name'])
-    # X_train = df.iloc[:training_split]
-    # y_train = y.iloc[:training_split]
-    # X_val = df.iloc[training_split:]
-    # y_val = y.iloc[training_split:]
-    #
-    # # 3. Standardise data
-    # X_mean = X_train.mean(axis=0)
-    # X_sd = X_train.std(axis=0)
-    # y_mean = y.mean()
-    # y_sd = y.std()
-    #
-    # X_train = (X_train - X_mean)/X_sd
-    # X_val = (X_val - X_mean)/X_sd
-    # y_train = (y_train - y_mean)/y_sd
-    # y_val = (y_val - y_mean)/y_sd
-    #
-    # # 4. Correlation plot to avoid multicollinearity
-    # plt.figure(figsize=(9, 6))
-    # sns.heatmap(df.corr(method='pearson'), linewidth=0.5)
-    # plt.show()
-
     X_train = np.load('data/X_train.npy')
     X_val = np.load('data/X_val.npy')
     y_train = np.load('data/y_train.npy')
@@ -99,118 +183,15 @@ if __name__ == '__main__':
     y_train = pd.DataFrame(y_train)
     y_val = pd.DataFrame(y_val)
 
-    # 7. Define model
-    np.random.seed(1234)
-    W = np.random.random([X_train.shape[1], 1])
-    b = np.random.random([1, 1])
-    lr = 1e-1
-    epochs = 15
-    y_train = np.reshape(y_train.values, [-1, 1])
-    y_val = np.reshape(y_val.values, [-1, 1])
+    eta_grid = [1e-3, 1e-2, 1e-1]
+    alpha_grid = [0.01, 0.05, 0.1, 0.15, 0.2]
+    gamma_grid = []
 
-    # Training---------------------------------------------------
-
-    tr_losses = np.zeros([epochs])
-    vl_losses = np.zeros([epochs])
-    for epoch in range(epochs):
-        n_processes = 10
-        process_size = X_train.shape[0]//n_processes
-
-        vl_process_size = X_val.shape[0]//n_processes
-        processes = []
-        w_gradient = None
-        b_gradient = None
-        # Inferencing
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-
-            # Prediction------------------------------------------------------------------------------------------------
-            pred = np.zeros([n_processes, process_size])
-            for p_idx in range(n_processes):
-                start_idx = p_idx * process_size
-                _length = start_idx + process_size
-                if p_idx == n_processes-1:
-                    _length = X_train.shape[0]
-                x_subset = X_train.iloc[start_idx:_length]
-                p = executor.submit(predict, X=x_subset, W=W, b=b, p_idx=p_idx)
-                processes.append(p)
-
-            for process in concurrent.futures.as_completed(processes):
-                result = process.result()
-                p_idx = list(result.keys())[0]
-                result = pd.Series(result.values()).iloc[0].values
-                pred[p_idx, :_length] = result[:process_size, 0]
-
-                remaining = None
-                if p_idx == n_processes - 1:
-                    pred = np.reshape(pred, [-1, 1])
-                    remaining_size = X_train.shape[0] - int(process_size * n_processes)
-                    if remaining_size > 0:
-                        pred = list(pred.reshape([-1]))
-                        pred.extend(result[-remaining_size:, 0])
-                        pred = np.array(pred).reshape([-1, 1])
-
-            # Val val_prediction------------------------------------------------------------------------------------------------
-            val_pred = np.zeros([n_processes, vl_process_size])
-            processes = []
-            for p_idx in range(n_processes):
-                start_idx = p_idx * vl_process_size
-                _length = start_idx + vl_process_size
-                if p_idx == n_processes - 1:
-                    _length = X_val.shape[0]
-                x_subset = X_val.iloc[start_idx:_length]
-                p = executor.submit(predict, X=x_subset, W=W, b=b, p_idx=p_idx)
-                processes.append(p)
-
-            for process in concurrent.futures.as_completed(processes):
-                result = process.result()
-                p_idx = list(result.keys())[0]
-                result = pd.Series(result.values()).iloc[0].values
-                val_pred[p_idx, :_length] = result[:vl_process_size, 0]
-
-                remaining = None
-                if p_idx == n_processes - 1:
-                    val_pred = np.reshape(val_pred, [-1, 1])
-                    remaining_size = X_val.shape[0] - int(vl_process_size * n_processes)
-                    if remaining_size > 0:
-                        val_pred = list(val_pred.reshape([-1]))
-                        val_pred.extend(result[-remaining_size:, 0])
-                        val_pred = np.array(val_pred).reshape([-1, 1])
-
-            # Compute gradient------------------------------------------------------------------------------------------
-            processes = []
-            for p_idx in range(n_processes):
-                start_idx = p_idx * process_size
-                _length = start_idx + process_size
-                if p_idx == n_processes-1:
-                    _length = X_train.shape[0]
-                x_subset = X_train.iloc[start_idx:_length]
-                y_subset = y_train[start_idx:_length]
-                pred_subset = pred[start_idx:_length]
-                p = executor.submit(get_gradient, X=x_subset, y=y_subset, pred=pred_subset, W=W)
-                processes.append(p)
-
-            for process in concurrent.futures.as_completed(processes):
-                [w_grad, b_grad] = process.result()
-                if w_gradient is None:
-                    w_gradient = w_grad
-                    b_gradient = np.sum(b_grad)[None, None]
-                else:
-                    w_gradient += w_grad
-                    b_gradient += np.sum(b_grad)[None, None]
-            w_gradient = -2/X_train.shape[0] * w_gradient
-            b_gradient = -2/X_train.shape[0] * b_gradient
-
-            # Update weights--------------------------------------------------------------------------------------------
-            W -= lr * w_gradient
-            b -= lr * np.mean(b_gradient, axis=0)
-
-            # Loss------------------------------------------------------------------------------------------------------
-            tr_loss = mse(y_train, pred, W)
-            vl_loss = mse(y_val, val_pred, W)
-            tr_losses[epoch] = tr_loss
-            vl_losses[epoch] = vl_loss
-            print(f'Epoch: {epoch} Loss: {tr_loss} Val_Loss: {vl_loss}')
+    lr_mp = LinearRegression_MP()
+    history, tr_loss, vl_loss = lr_mp.fit(X_train, y_train, X_val, y_val, epochs=50)
 
     plt.figure()
-    sns.lineplot(list(range(51)), tr_loss, markers=True)
+    plt.plot(list(range(lr_mp.epochs)), history['vl'], '-r', label='On Decorrelated data')
+    plt.plot(list(range(lr_mp.epochs)), history['vl'], '-r', label='Original data')
+    plt.legend()
     plt.show()
