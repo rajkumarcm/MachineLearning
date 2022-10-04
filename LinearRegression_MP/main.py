@@ -18,9 +18,11 @@ def get_valid_rows(series):
     return series[b_mask]
 
 # 5. Loss function
-def mse(y, pred):
+def mse(y, pred, W, gamma=0, alpha=1):
     diff = y - pred
-    return 1/y.shape[0] * (diff.T @ diff)[0][0]
+    return float(1/y.shape[0] * (diff.T @ diff)[0][0] + \
+           alpha * gamma * np.sum(np.abs(W)) + \
+           ((alpha * (1-gamma))/2) * np.sum(W**2))
 
 # 6. Inferencing
 def predict(X, W, b, p_idx):
@@ -28,10 +30,13 @@ def predict(X, W, b, p_idx):
     result[p_idx] = X @ W + b
     return result
 
-def get_gradient(X, y, pred):
+def get_gradient(X, y, pred, W, gamma=1, alpha=1):
     y = np.reshape(y, [-1, 1])
     pred = np.reshape(pred, [-1, 1])
-    return X.T @ (y - pred), (y - pred)
+    w_grad = X.T @ (y - pred) - \
+             (alpha * gamma * np.sign(W)) - \
+             (alpha * (1 - gamma)) * W
+    return w_grad, (y - pred) # for weights, and bias
 
 
 if __name__ == '__main__':
@@ -140,7 +145,7 @@ if __name__ == '__main__':
                 x_subset = X_train.iloc[start_idx:_length]
                 y_subset = y_train[start_idx:_length]
                 pred_subset = pred[start_idx:_length]
-                p = executor.submit(get_gradient, X=x_subset, y=y_subset, pred=pred_subset)
+                p = executor.submit(get_gradient, X=x_subset, y=y_subset, pred=pred_subset, W=W)
                 processes.append(p)
 
             for process in concurrent.futures.as_completed(processes):
@@ -159,7 +164,7 @@ if __name__ == '__main__':
             b -= lr * np.mean(b_gradient, axis=0)
 
             # Loss------------------------------------------------------------------------------------------------------
-            tr_loss = mse(y_train, pred)
+            tr_loss = mse(y_train, pred, W)
             tr_losses[epoch] = tr_loss
             print(f'Epoch: {epoch} Loss: {tr_loss}')
 
