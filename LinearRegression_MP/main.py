@@ -51,7 +51,7 @@ class LinearRegression_MP:
         return w_grad, (y - pred) # for weights, and bias
 
 
-    def fit(self, X_train, y_train, X_val, y_val, epochs=15):
+    def fit(self, X_train, y_train, X_val, y_val, epochs=15, n_workers=16):
 
         # 7. Define model
         self.W = np.random.random([X_train.shape[1], 1])
@@ -66,7 +66,7 @@ class LinearRegression_MP:
         tr_losses = np.zeros([epochs])
         vl_losses = np.zeros([epochs])
         for epoch in range(epochs):
-            n_processes = 16
+            n_processes = n_workers
             process_size = X_train.shape[0]//n_processes
 
             vl_process_size = X_val.shape[0]//n_processes
@@ -74,8 +74,14 @@ class LinearRegression_MP:
             w_gradient = None
             b_gradient = None
 
-            s = 10
-            self.lr = self.lr0 / (1 + (epoch / n_processes))
+            # s = 10
+            # self.lr = self.lr0 / (1 + (epoch / n_processes))
+            if epoch <= 20:
+                self.lr = 1e-1
+            elif epoch > 20 and epoch <= 25:
+                self.lr = 1e-2
+            elif epoch > 25:
+                self.lr = 1e-3
 
             # Inferencing
             with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -187,11 +193,11 @@ if __name__ == '__main__':
     alpha_grid = [0.01, 0.05, 0.1, 0.15, 0.2]
     gamma_grid = []
 
-    lr_mp = LinearRegression_MP()
+    lr_mp = LinearRegression_MP(alpha=params[1], gamma=params[2], lr=params[0])
     history, tr_loss, vl_loss = lr_mp.fit(X_train, y_train, X_val, y_val, epochs=50)
 
     plt.figure()
-    plt.plot(list(range(lr_mp.epochs)), history['vl'], '-r', label='On Decorrelated data')
-    plt.plot(list(range(lr_mp.epochs)), history['vl'], '-r', label='Original data')
+    plt.plot(list(range(50)), history['tr'], '-b', label='Training')
+    plt.plot(list(range(50)), history['vl'], '-r', label='Validation')
     plt.legend()
     plt.show()
