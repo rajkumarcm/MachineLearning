@@ -110,6 +110,14 @@ class DecisionTreeClassifier:
             node.children[val_of_attribute] = child
         return node
 
+    def predict(self, sample, node):
+        value = sample[node.label]
+        child = node.children[value]
+
+        if len(child.children) == 0:
+            return child.label
+        else:
+            return self.predict(sample, child)
 
 if __name__ == '__main__':
 
@@ -121,7 +129,7 @@ if __name__ == '__main__':
     tree = dt.create_decision_tree(X=X, y=y, n_total_attributes=len(X.columns),
                                    class_label='buying', mode_of_root_node=y.mode().max(),
                                    prev_n_samples=X.shape[0])
-
+    pred = dt.predict(df.iloc[0], tree)
     # For debugging purposes....
     # x = pd.Series(['Sunny']*5 + ['Overcast']*4 + ['Rain']*5)
     # y = pd.Series([1]*2 + [0]*3 + [1]*4 + [1]*3 + [0]*2)

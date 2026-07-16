@@ -14,6 +14,22 @@ class LReLU:
         D[X < 0] = self.alpha
         return D
 
+class Linear:
+    def __call__(self, X):
+        return np.copy(X)
+
+    def grad(self, X):
+        return np.ones_like(X)
+
+class Sigmoid:
+    def __call__(self, X):
+        n = np.copy(X)
+        return (1/(1 + np.exp(-n)))
+
+    def grad(self, X):
+        a = np.copy(X)
+        return a * (1 - a)
+
 class MSE:
     def __call__(self, y_pred, y):
         diff = y_pred - y
@@ -82,8 +98,8 @@ class Dense: # For now let's implement just Dense
                 reg_grad += l2_coeff * self.W
             else:
                 reg_grad = l2_coeff * self.W
-        if self.reg != 'None':
-            local_grad += reg_grad
+        # if self.reg != 'None':
+        #     local_grad += reg_grad
         #--------------------------------------------------------------
         outbound_grad = tmp_grad @ self.W.T  # gradient for the next layer
         return local_grad, local_grad_b, outbound_grad
@@ -207,7 +223,7 @@ if __name__ == '__main__':
     # y_val = y[50:]
 
     import pandas as pd
-    df = pd.read_csv('data/insurance.csv')
+    df = pd.read_csv('../data/insurance.csv')
     df.drop('region', 'columns', inplace=True)
     df.sex.replace({'female':1, 'male':0}, inplace=True)
     df.smoker.replace({'yes':0, 'no':1}, inplace=True)
@@ -223,72 +239,103 @@ if __name__ == '__main__':
     y_val = df.iloc[-100:, -1].to_numpy()
     y_val = np.reshape(y_val, [-1, 1])
 
-    print('Fitting model with L1 regularization')
-    l1_config = [Dense(X_train.shape[1], 5, LReLU, reg='l1'),
-                 Dense(5, 1, LReLU, reg='l1')]
-    l1_model = Model(l1_config, MSE)
-    l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1',
-                           verbose=False)
+    # print('Fitting model with L1 regularization')
+    # l1_config = [Dense(X_train.shape[1], 5, LReLU, reg='l1'),
+    #              Dense(5, 1, LReLU, reg='l1')]
+    # l1_model = Model(l1_config, MSE)
+    # l1_hist = l1_model.fit(X_train, y_train, X_val, y_val, epochs=l1_epochs, batch_size=batch_size, lr=lr, reg='l1',
+    #                        verbose=False)
+    #
+    # print('Fitting model with L2 regularization')
+    # l2_config = [Dense(X_train.shape[1], 5, LReLU, reg='l2'),
+    #              Dense(5, 1, LReLU, reg='l2')]
+    # l2_model = Model(l2_config, MSE)
+    # l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2',
+    #                        verbose=False)
 
-    print('Fitting model with L2 regularization')
-    l2_config = [Dense(X_train.shape[1], 5, LReLU, reg='l2'),
-                 Dense(5, 1, LReLU, reg='l2')]
-    l2_model = Model(l2_config, MSE)
-    l2_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=l2_epochs, batch_size=batch_size, lr=lr, reg='l2',
-                           verbose=False)
+    # print('Fitting model without regularization')
+    # no_reg_config = [Dense(X_train.shape[1], 5, LReLU),
+    #                  Dense(5, 1, LReLU)]
+    # model_no_reg = Model(no_reg_config, MSE)
+    # no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr,
+    #                                verbose=True)
+    # plt.figure()
+    # plt.plot(y_train, '.b')
+    # plt.plot(model_no_reg(X_train), '.r')
+    # plt.show()
 
     print('Fitting model without regularization')
-    no_reg_config = [Dense(X_train.shape[1], 5, LReLU),
-                     Dense(5, 1, LReLU)]
+    X_train = np.random.uniform(-2*np.pi, 2*np.pi, 3000)
+    y_train = np.sin(X_train)
+
+    X_val = np.random.uniform(-2*np.pi, 2*np.pi, 3000)
+    y_val = np.sin(X_val)
+
+    X_train = X_train[..., None]
+    y_train = y_train[..., None]
+
+    X_val = X_val[..., None]
+    y_val = y_val[..., None]
+
+    no_reg_config = [Dense(X_train.shape[1], 10, Sigmoid),
+                     Dense(10, 1, Linear)]
     model_no_reg = Model(no_reg_config, MSE)
-    no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size, lr=lr,
+    no_reg_hist = model_no_reg.fit(X_train, y_train, X_val, y_val, epochs=100, batch_size=batch_size, lr=1e-6,
                                    verbose=True)
-
-    print('Fitting elastic model')
-    elastic_config = [Dense(X_train.shape[1], 5, LReLU, reg='elastic'),
-                      Dense(5, 1, LReLU, reg='elastic')]
-    elastic_model = Model(elastic_config, MSE)
-    elastic_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=elastic_epochs, batch_size=batch_size,
-                                lr=lr, reg='elastic', verbose=True)
-
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
-    axes[0, 0].plot(range(epochs), l1_hist['tr_loss'][:epochs], '-b', label='L1 reg tr loss')
-    axes[0, 0].plot(range(epochs), l2_hist['tr_loss'][:epochs], '-r', label='L2 reg tr loss')
-    axes[0, 0].plot(range(epochs), no_reg_hist['tr_loss'], '-g', label='No reg tr loss')
-    axes[0, 0].plot(range(epochs), elastic_hist['tr_loss'][:epochs], '-m', label='Elastic net reg tr loss')
-    axes[0, 0].set_xlabel('Epochs')
-    axes[0, 0].set_ylabel('MSE with regularization')
-    axes[0, 0].set_title('Training loss with different reg schemes')
-    axes[0, 0].legend()
-
-    axes[0, 1].plot(range(l1_epochs), l1_hist['tr_loss'], '-b', label='L1 reg tr loss')
-    axes[0, 1].plot(range(l1_epochs), l1_hist['vl_loss'], '-r', label='L1 reg vl loss')
-    axes[0, 1].set_xlabel('Epochs')
-    axes[0, 1].set_ylabel('MSE')
-    axes[0, 1].set_title('L1 regularization')
-    axes[0, 1].legend()
-
-    axes[1, 0].plot(range(l2_epochs), l2_hist['tr_loss'], '-b', label='L2 reg tr loss')
-    axes[1, 0].plot(range(l2_epochs), l2_hist['vl_loss'], '-r', label='L2 reg vl loss')
-    axes[1, 0].set_xlabel('Epochs')
-    axes[1, 0].set_ylabel('MSE')
-    axes[1, 0].set_title('L2 regularization')
-    axes[1, 0].legend()
-
-    axes[1, 1].plot(range(epochs), no_reg_hist['tr_loss'], '-b', label='No reg tr loss')
-    axes[1, 1].plot(range(epochs), no_reg_hist['vl_loss'], '-r', label='No reg vl loss')
-    axes[1, 1].set_xlabel('Epochs')
-    axes[1, 1].set_ylabel('MSE')
-    axes[1, 1].set_title('No regularization')
-    axes[1, 1].legend()
-    plt.show()
-
     plt.figure()
-    plt.plot(range(elastic_epochs), elastic_hist['tr_loss'], '-b', label='Elastic net reg tr loss')
-    plt.plot(range(elastic_epochs), elastic_hist['vl_loss'], '-r', label='Elastic net reg vl loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('MSE')
-    plt.title('Elastic net regularization')
-    plt.legend()
+    plt.plot(X_train, y_train, '.b')
+    plt.plot(X_train, model_no_reg(X_train), '.r')
     plt.show()
+
+
+
+
+    #
+    # print('Fitting elastic model')
+    # elastic_config = [Dense(X_train.shape[1], 5, LReLU, reg='elastic'),
+    #                   Dense(5, 1, LReLU, reg='elastic')]
+    # elastic_model = Model(elastic_config, MSE)
+    # elastic_hist = l2_model.fit(X_train, y_train, X_val, y_val, epochs=elastic_epochs, batch_size=batch_size,
+    #                             lr=lr, reg='elastic', verbose=True)
+
+    # fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    # axes[0, 0].plot(range(epochs), l1_hist['tr_loss'][:epochs], '-b', label='L1 reg tr loss')
+    # axes[0, 0].plot(range(epochs), l2_hist['tr_loss'][:epochs], '-r', label='L2 reg tr loss')
+    # axes[0, 0].plot(range(epochs), no_reg_hist['tr_loss'], '-g', label='No reg tr loss')
+    # axes[0, 0].plot(range(epochs), elastic_hist['tr_loss'][:epochs], '-m', label='Elastic net reg tr loss')
+    # axes[0, 0].set_xlabel('Epochs')
+    # axes[0, 0].set_ylabel('MSE with regularization')
+    # axes[0, 0].set_title('Training loss with different reg schemes')
+    # axes[0, 0].legend()
+    #
+    # axes[0, 1].plot(range(l1_epochs), l1_hist['tr_loss'], '-b', label='L1 reg tr loss')
+    # axes[0, 1].plot(range(l1_epochs), l1_hist['vl_loss'], '-r', label='L1 reg vl loss')
+    # axes[0, 1].set_xlabel('Epochs')
+    # axes[0, 1].set_ylabel('MSE')
+    # axes[0, 1].set_title('L1 regularization')
+    # axes[0, 1].legend()
+    #
+    # axes[1, 0].plot(range(l2_epochs), l2_hist['tr_loss'], '-b', label='L2 reg tr loss')
+    # axes[1, 0].plot(range(l2_epochs), l2_hist['vl_loss'], '-r', label='L2 reg vl loss')
+    # axes[1, 0].set_xlabel('Epochs')
+    # axes[1, 0].set_ylabel('MSE')
+    # axes[1, 0].set_title('L2 regularization')
+    # axes[1, 0].legend()
+    #
+    # axes[1, 1].plot(range(epochs), no_reg_hist['tr_loss'], '-b', label='No reg tr loss')
+    # axes[1, 1].plot(range(epochs), no_reg_hist['vl_loss'], '-r', label='No reg vl loss')
+    # axes[1, 1].set_xlabel('Epochs')
+    # axes[1, 1].set_ylabel('MSE')
+    # axes[1, 1].set_title('No regularization')
+    # axes[1, 1].legend()
+    # plt.show()
+
+    # plt.figure()
+    # plt.plot(range(elastic_epochs), elastic_hist['tr_loss'], '-b', label='Elastic net reg tr loss')
+    # plt.plot(range(elastic_epochs), elastic_hist['vl_loss'], '-r', label='Elastic net reg vl loss')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('MSE')
+    # plt.title('Elastic net regularization')
+    # plt.legend()
+    # plt.show()
 
